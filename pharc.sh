@@ -12,6 +12,7 @@
 #  - Secrets
 #    id | secret
 ####
+
 URI="https://phabricator.tools.fln-ltd.net"
 
 function get_reviews() {
@@ -23,10 +24,7 @@ function get_tasks() {
 }
 
 function get_diffs() {
-  token=$(get_secret)
-  uphid=$(get_self_db phid)
-  json="{"constraints": {"authors": ["$uphid"], "status": ["open"]}, "order": "newest"}"
-  return $(echo "$json" | arc call-conduit --conduit-uri "$URI" --conduit-token "$token" differential.revision.search)
+  echo "$@"
 }
 
 function create_task() {
@@ -64,26 +62,42 @@ done
 
 function setup() {
   setup_db
-  echo "Provide your API token which you can generate at: "
+  echo "Provide your API token which you can generate at: $URI/settings"
   read secret
   save_secret "$secret"
-  user=$(get_self_arc)
-  echo "$user"
+  user=$(get_self_arc) | jq '.response'
 }
 
 ###############
 # ARC METHODS #
 ###############
 
+function get_arc_response() {
+  token=get_secret
+  return $(echo "$1" | arc call-conduit --conduit-uri "$URI" --conduit-token "$token" "$2")
+}
+
 function get_user_arc() {
-  token=get_token
-  json="{"constraints": {"username": ["$1"]}}"
-  return $(echo "$json" | arc call-conduit --conduit-uri "$URI" --conduit-token "$token" user.search)
+  json='{"constraints": {"username": ["$1"]}}'
+  return get_arc_response $json "user.search"
 }
 
 function get_self_arc() {
-  token=get_token
-  return $(arc call-conduit --conduit-uri "$URI" --conduit-token "$token" user.whoami)
+  return get_arc_response "{}" "user.whoami"
+}
+
+function get_diffs_by_author_arc() {
+  json='{"constraints": {"authorPHIDs": ["$1"], "status": ["open"]}, "order": "newest"}'
+  return get_arc_response $json "differential.revision.search"
+}
+
+function get_diffs_by_reviewer_arc() {
+  json='{"constraints": {"reviewerPHIDs": ["$1"], "status": ["open"]}, "order": "newest"}'
+  return get_arc_response $json "differential.revision.search"
+}
+
+function get_tasks_by_asignee() {
+  json='{"constraints": {"assigned": ["$1"], "statuses": ["open"]}, "order": "newest"}'
 }
 
 ##############
@@ -93,16 +107,16 @@ function get_self_arc() {
 DBNAME="pharc"
 
 function save_user() {
-  sqlite3 "$DBNAME" "INSERT INTO users (phid, username, self) VALUES ($1, $2, $3);"
+  return $(sqlite3 "$DBNAME" "INSERT INTO users (phid, username, self) VALUES ($1, $2, $3);")
 }
 
 function get_self_db() {
-  return get_user_db $1 self 1
+  return get_user_db $1 "self" 1
 }
 
 function get_user_db() {
-    query="SELECT $1 FROM users WHERE $2=$3;"
-    return $(sqlite3 "$DBNAME" "$query")
+  query="SELECT $1 FROM users WHERE $2=$3;"
+  return $(sqlite3 "$DBNAME" "$query")
 }
 
 function save_secret() {
@@ -114,20 +128,20 @@ function get_secret() {
 }
 
 function setup_db() {
-  sqlite3 "$DBNAME" "
+  $(sqlite3 "$DBNAME" "
     CREATE TABLE IF NOT EXISTS
-      secret(
-        id integer PRIMARY KEY,
-        secret TEXT NOT NULL UNIQUE
-      );"
-  sqlite3 "$DBNAME" "
+    secret(
+    id integer PRIMARY KEY,
+    secret TEXT NOT NULL UNIQUE
+  );")
+  $(sqlite3 "$DBNAME" "
     CREATE TABLE IF NOT EXISTS
-      users(
-        id INTEGER PRIMARY KEY,
-        phid TEXT NOT NULL UNIQUE,
-        self INTEGER UNIQUE,
-        username TEXT NOT NULL UNIQUE
-      );"
+    users(
+    id INTEGER PRIMARY KEY,
+    phid TEXT NOT NULL UNIQUE,
+    self INTEGER UNIQUE,
+    username TEXT NOT NULL UNIQUE
+  );")
 }
 
 
